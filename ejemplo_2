@@ -1,0 +1,70 @@
+import matplotlib.cm as cm
+import numpy as np
+from sklearn.cluster import KMeans, MiniBatchKMeans
+from sklearn.utils import check_random_state, shuffle
+import matplotlib.pyplot as plt
+
+# Parámetros para generar el dataset y evaluación de modelos
+n_samples_per_center = 100
+grid_size = 3
+scale = 0.1
+n_clusters = grid_size**2
+n_init_range = np.array([1, 5, 10, 15, 20])
+n_runs = 5
+
+# Función para crear datos en base a centros predefinidos en una grilla
+def make_data(random_state, n_samples_per_center, grid_size, scale):
+    random_state = check_random_state(random_state)
+    centers = np.array([[i, j] for i in range(grid_size) for j in range(grid_size)])
+    noise = random_state.normal(scale=scale, size=(n_samples_per_center, centers.shape[1]))
+    X = np.concatenate([c + noise for c in centers])
+    y = np.concatenate([[i] * n_samples_per_center for i in range(len(centers))])
+    return shuffle(X, y, random_state=random_state)
+
+# Parte 1: Evaluación cuantitativa de varios métodos de inicialización de K-Means
+plt.figure()
+plots = []
+legends = []
+
+# Evaluación de distintos casos de KMeans y MiniBatchKMeans
+cases = [
+    (KMeans, "k-means++", {}, "^-"),
+    (KMeans, "random", {}, "o-"),
+    (MiniBatchKMeans, "k-means++", {"max_no_improvement": 3}, "x-"),
+    (MiniBatchKMeans, "random", {"max_no_improvement": 3, "init_size": 500}, "d-"),
+]
+
+# Bucle para ejecutar cada estrategia de clustering
+for factory, init, params, format in cases:
+    print(f"Evaluación de {factory.__name__} con inicialización {init}")
+    inertia = np.empty((len(n_init_range), n_runs))
+    
+    for run_id in range(n_runs):
+        X, y = make_data(run_id, n_samples_per_center, grid_size, scale)
+        for i, n_init in enumerate(n_init_range):
+            km = factory(n_clusters=n_clusters, init=init, random_state=run_id, n_init=n_init, **params).fit(X)
+            inertia[i, run_id] = km.inertia_  # Inercia como métrica de calidad
+
+    p = plt.errorbar(n_init_range, inertia.mean(axis=1), inertia.std(axis=1), fmt=format)
+    plots.append(p[0])
+    legends.append(f"{factory.__name__} con inicialización {init}")
+
+plt.xlabel("n_init")
+plt.ylabel("Inercia")
+plt.legend(plots, legends)
+plt.title(f"Inercia promedio para varias inicializaciones de K-Means en {n_runs} ejecuciones")
+plt.show()
+
+# Parte 2: Inspección visual de la convergencia
+X, y = make_data(np.random.RandomState(0), n_samples_per_center, grid_size, scale)
+km = MiniBatchKMeans(n_clusters=n_clusters, init="random", n_init=1, random_state=np.random.RandomState(0)).fit(X)
+
+plt.figure()
+for k in range(n_clusters):
+    my_members = km.labels_ == k
+    color = cm.nipy_spectral(float(k) / n_clusters, 1)
+    plt.plot(X[my_members, 0], X[my_members, 1], ".", c=color)
+    cluster_center = km.cluster_centers_[k]
+    plt.plot(cluster_center[0], cluster_center[1], "o", markerfacecolor=color, markeredgecolor="k", markersize=6)
+plt.title("Asignación de clusters con MiniBatchKMeans (init aleatoria)")
+plt.show()
